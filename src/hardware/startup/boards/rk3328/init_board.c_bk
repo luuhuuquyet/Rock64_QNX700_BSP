@@ -1,0 +1,378 @@
+/*
+ * $QNXLicenseC:
+ * Copyright 2017, QNX Software Systems.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"). You
+ * may not reproduce, modify or distribute this software except in
+ * compliance with the License. You may obtain a copy of the License
+ * at: http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" basis,
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
+ *
+ * This file may contain contributions from others, either as
+ * contributors under the License or as licensors under other terms.
+ * Please review this entire file for other proprietary rights or license
+ * notices, as well as the QNX Development Suite License Guide at
+ * http://licensing.qnx.com/license-guide/ for other information.
+ * $
+ */
+
+#include "startup.h"
+#include <errno.h>
+#include <aarch64/rk3328.h>
+
+
+#define RK3328_SCHMITT_BITS_PER_PIN		1
+#define RK3328_SCHMITT_PINS_PER_REG		16
+#define RK3328_SCHMITT_BANK_STRIDE		8
+#define RK3328_SCHMITT_GRF_OFFSET		0x380
+
+
+enum periph_id {
+	PERIPH_ID_PWM0,
+	PERIPH_ID_PWM1,
+	PERIPH_ID_PWM2,
+	PERIPH_ID_PWM3,
+	PERIPH_ID_PWM4,
+	PERIPH_ID_I2C0,
+	PERIPH_ID_I2C1,
+	PERIPH_ID_I2C2,
+	PERIPH_ID_I2C3,
+	PERIPH_ID_I2C4,
+	PERIPH_ID_I2C5,
+	PERIPH_ID_SPI0,
+	PERIPH_ID_SPI1,
+	PERIPH_ID_SPI2,
+	PERIPH_ID_SPI3,
+	PERIPH_ID_SPI4,
+	PERIPH_ID_SPI5,
+	PERIPH_ID_UART0,
+	PERIPH_ID_UART1,
+	PERIPH_ID_UART2,
+	PERIPH_ID_UART3,
+	PERIPH_ID_UART4,
+	PERIPH_ID_LCDC0,
+	PERIPH_ID_LCDC1,
+	PERIPH_ID_SDMMC0,
+	PERIPH_ID_SDMMC1,
+	PERIPH_ID_SDMMC2,
+	PERIPH_ID_HDMI,
+	PERIPH_ID_GMAC,
+
+	PERIPH_ID_COUNT,
+
+	/* Some aliases */
+	PERIPH_ID_EMMC = PERIPH_ID_SDMMC0,
+	PERIPH_ID_SDCARD = PERIPH_ID_SDMMC1,
+	PERIPH_ID_UART_BT = PERIPH_ID_UART0,
+	PERIPH_ID_UART_BB = PERIPH_ID_UART1,
+	PERIPH_ID_UART_DBG = PERIPH_ID_UART2,
+	PERIPH_ID_UART_GPS = PERIPH_ID_UART3,
+	PERIPH_ID_UART_EXP = PERIPH_ID_UART4,
+};
+
+
+enum {
+	/* GPIO0A_IOMUX */
+	GPIO0A5_SEL_SHIFT	= 10,
+	GPIO0A5_SEL_MASK	= 3 << GPIO0A5_SEL_SHIFT,
+	GPIO0A5_I2C3_SCL	= 2,
+
+	GPIO0A6_SEL_SHIFT	= 12,
+	GPIO0A6_SEL_MASK	= 3 << GPIO0A6_SEL_SHIFT,
+	GPIO0A6_I2C3_SDA	= 2,
+
+	GPIO0A7_SEL_SHIFT	= 14,
+	GPIO0A7_SEL_MASK	= 3 << GPIO0A7_SEL_SHIFT,
+	GPIO0A7_EMMC_DATA0	= 2,
+
+	/* GPIO0D_IOMUX*/
+	GPIO0D6_SEL_SHIFT	= 12,
+	GPIO0D6_SEL_MASK	= 3 << GPIO0D6_SEL_SHIFT,
+	GPIO0D6_GPIO		= 0,
+	GPIO0D6_SDMMC0_PWRENM1	= 3,
+
+	/* GPIO1A_IOMUX */
+	GPIO1A0_SEL_SHIFT	= 0,
+	GPIO1A0_SEL_MASK	= 0x3fff << GPIO1A0_SEL_SHIFT,
+	GPIO1A0_CARD_DATA_CLK_CMD_DETN	= 0x1555,
+
+	/* GPIO2A_IOMUX */
+	GPIO2A0_SEL_SHIFT	= 0,
+	GPIO2A0_SEL_MASK	= 3 << GPIO2A0_SEL_SHIFT,
+	GPIO2A0_UART2_TX_M1	= 1,
+
+	GPIO2A1_SEL_SHIFT	= 2,
+	GPIO2A1_SEL_MASK	= 3 << GPIO2A1_SEL_SHIFT,
+	GPIO2A1_UART2_RX_M1	= 1,
+
+	GPIO2A2_SEL_SHIFT	= 4,
+	GPIO2A2_SEL_MASK	= 3 << GPIO2A2_SEL_SHIFT,
+	GPIO2A2_PWM_IR		= 1,
+
+	GPIO2A4_SEL_SHIFT	= 8,
+	GPIO2A4_SEL_MASK	= 3 << GPIO2A4_SEL_SHIFT,
+	GPIO2A4_PWM_0		= 1,
+	GPIO2A4_I2C1_SDA,
+
+	GPIO2A5_SEL_SHIFT	= 10,
+	GPIO2A5_SEL_MASK	= 3 << GPIO2A5_SEL_SHIFT,
+	GPIO2A5_PWM_1		= 1,
+	GPIO2A5_I2C1_SCL,
+
+	GPIO2A6_SEL_SHIFT	= 12,
+	GPIO2A6_SEL_MASK	= 3 << GPIO2A6_SEL_SHIFT,
+	GPIO2A6_PWM_2		= 1,
+
+	GPIO2A7_SEL_SHIFT	= 14,
+	GPIO2A7_SEL_MASK	= 3 << GPIO2A7_SEL_SHIFT,
+	GPIO2A7_GPIO		= 0,
+	GPIO2A7_SDMMC0_PWRENM0,
+
+	/* GPIO2BL_IOMUX */
+	GPIO2BL0_SEL_SHIFT	= 0,
+	GPIO2BL0_SEL_MASK	= 0x3f << GPIO2BL0_SEL_SHIFT,
+	GPIO2BL0_SPI_CLK_TX_RX_M0	= 0x15,
+
+	GPIO2BL3_SEL_SHIFT	= 6,
+	GPIO2BL3_SEL_MASK	= 3 << GPIO2BL3_SEL_SHIFT,
+	GPIO2BL3_SPI_CSN0_M0	= 1,
+
+	GPIO2BL4_SEL_SHIFT	= 8,
+	GPIO2BL4_SEL_MASK	= 3 << GPIO2BL4_SEL_SHIFT,
+	GPIO2BL4_SPI_CSN1_M0	= 1,
+
+	GPIO2BL5_SEL_SHIFT	= 10,
+	GPIO2BL5_SEL_MASK	= 3 << GPIO2BL5_SEL_SHIFT,
+	GPIO2BL5_I2C2_SDA	= 1,
+
+	GPIO2BL6_SEL_SHIFT	= 12,
+	GPIO2BL6_SEL_MASK	= 3 << GPIO2BL6_SEL_SHIFT,
+	GPIO2BL6_I2C2_SCL	= 1,
+
+	/* GPIO2D_IOMUX */
+	GPIO2D0_SEL_SHIFT	= 0,
+	GPIO2D0_SEL_MASK	= 3 << GPIO2D0_SEL_SHIFT,
+	GPIO2D0_I2C0_SCL	= 1,
+
+	GPIO2D1_SEL_SHIFT	= 2,
+	GPIO2D1_SEL_MASK	= 3 << GPIO2D1_SEL_SHIFT,
+	GPIO2D1_I2C0_SDA	= 1,
+
+	GPIO2D4_SEL_SHIFT	= 8,
+	GPIO2D4_SEL_MASK	= 0xff << GPIO2D4_SEL_SHIFT,
+	GPIO2D4_EMMC_DATA1234	= 0xaa,
+
+	/* GPIO3C_IOMUX */
+	GPIO3C0_SEL_SHIFT	= 0,
+	GPIO3C0_SEL_MASK	= 0x3fff << GPIO3C0_SEL_SHIFT,
+	GPIO3C0_EMMC_DATA567_PWR_CLK_RSTN_CMD	= 0x2aaa,
+
+	/* COM_IOMUX */
+	IOMUX_SEL_UART2_SHIFT	= 0,
+	IOMUX_SEL_UART2_MASK	= 3 << IOMUX_SEL_UART2_SHIFT,
+	IOMUX_SEL_UART2_M0	= 0,
+	IOMUX_SEL_UART2_M1,
+
+	IOMUX_SEL_SPI_SHIFT	= 4,
+	IOMUX_SEL_SPI_MASK	= 3 << IOMUX_SEL_SPI_SHIFT,
+	IOMUX_SEL_SPI_M0	= 0,
+	IOMUX_SEL_SPI_M1,
+	IOMUX_SEL_SPI_M2,
+
+	IOMUX_SEL_SDMMC_SHIFT	= 7,
+	IOMUX_SEL_SDMMC_MASK	= 1 << IOMUX_SEL_SDMMC_SHIFT,
+	IOMUX_SEL_SDMMC_M0	= 0,
+	IOMUX_SEL_SDMMC_M1,
+};
+
+
+#define RK_CLRSETBITS(clr, set)		((((clr) | (set)) << 16) | (set))
+#define RK_SETBITS(set)			RK_CLRSETBITS(0, set)
+#define RK_CLRBITS(clr)			RK_CLRSETBITS(clr, 0)
+
+#define TIMER7_BASE		0xff810020
+
+#define rk_clrsetreg(addr, clr, set)	\
+				out32(RK3328_GRF_BASE + addr, ((clr) | (set)) << 16 | (set))
+#define rk_clrreg(addr, clr)		out32(RK3328_GRF_BASE + addr, (clr) << 16)
+#define rk_setreg(addr, set)		out32(RK3328_GRF_BASE + addr, (set) << 16 | (set))
+
+static void pinctrl_rk3328_pwm_config(int pwm_id){
+	switch (pwm_id) {
+		case PERIPH_ID_PWM0:
+			rk_clrsetreg(GRF_GPIO2A_IOMUX,
+				     GPIO2A4_SEL_MASK,
+				     GPIO2A4_PWM_0 << GPIO2A4_SEL_SHIFT);
+
+			break;
+		case PERIPH_ID_PWM1:
+			rk_clrsetreg(GRF_GPIO2A_IOMUX,
+				     GPIO2A5_SEL_MASK,
+				     GPIO2A5_PWM_1 << GPIO2A5_SEL_SHIFT);
+			break;
+		case PERIPH_ID_PWM2:
+			rk_clrsetreg(GRF_GPIO2A_IOMUX,
+				     GPIO2A6_SEL_MASK,
+				     GPIO2A6_PWM_2 << GPIO2A6_SEL_SHIFT);
+			break;
+		case PERIPH_ID_PWM3:
+			rk_clrsetreg(GRF_GPIO2A_IOMUX,
+				     GPIO2A2_SEL_MASK,
+				     GPIO2A2_PWM_IR << GPIO2A2_SEL_SHIFT);
+			break;
+		default:
+			//debug("pwm id = %d iomux error!\n", pwm_id);
+			break;
+	}
+}
+
+static void pinctrl_rk3328_i2c_config(int i2c_id)
+{
+	switch (i2c_id) {
+		case PERIPH_ID_I2C0:
+			rk_clrsetreg(GRF_GPIO2D_IOMUX,
+				     GPIO2D0_SEL_MASK | GPIO2D1_SEL_MASK,
+				     GPIO2D0_I2C0_SCL << GPIO2D0_SEL_SHIFT |
+				     GPIO2D1_I2C0_SDA << GPIO2D1_SEL_SHIFT);
+			break;
+		case PERIPH_ID_I2C1:
+			rk_clrsetreg(GRF_GPIO2A_IOMUX,
+				     GPIO2A4_SEL_MASK | GPIO2A5_SEL_MASK,
+				     GPIO2A5_I2C1_SCL << GPIO2A5_SEL_SHIFT |
+				     GPIO2A4_I2C1_SDA << GPIO2A4_SEL_SHIFT);
+			break;
+		case PERIPH_ID_I2C2:
+			rk_clrsetreg(GRF_GPIO2BL_IOMUX,
+				     GPIO2BL5_SEL_MASK | GPIO2BL6_SEL_MASK,
+				     GPIO2BL6_I2C2_SCL << GPIO2BL6_SEL_SHIFT |
+				     GPIO2BL5_I2C2_SDA << GPIO2BL5_SEL_SHIFT);
+			break;
+		case PERIPH_ID_I2C3:
+			rk_clrsetreg(GRF_GPIO0A_IOMUX,
+				     GPIO0A5_SEL_MASK | GPIO0A6_SEL_MASK,
+				     GPIO0A5_I2C3_SCL << GPIO0A5_SEL_SHIFT |
+				     GPIO0A6_I2C3_SDA << GPIO0A6_SEL_SHIFT);
+			break;
+		default:
+			//debug("i2c id = %d iomux error!\n", i2c_id);
+			break;
+	}
+}
+
+
+static int pinctrl_rk3328_spi_config(enum periph_id spi_id, int cs)
+{
+	unsigned int com_iomux = in32(RK3328_GRF_BASE + GRF_COM_IOMUX);
+
+	if ((com_iomux & IOMUX_SEL_SPI_MASK) !=
+		IOMUX_SEL_SPI_M0 << IOMUX_SEL_SPI_SHIFT) {
+		//debug("driver do not support iomux other than m0\n");
+		goto err;
+	}
+
+	switch (spi_id) {
+	case PERIPH_ID_SPI0:
+		switch (cs) {
+		case 0:
+			rk_clrsetreg(GRF_GPIO2BL_IOMUX,
+				     GPIO2BL3_SEL_MASK,
+				     GPIO2BL3_SPI_CSN0_M0
+				     << GPIO2BL3_SEL_SHIFT);
+			break;
+		case 1:
+			rk_clrsetreg(GRF_GPIO2BL_IOMUX,
+				     GPIO2BL4_SEL_MASK,
+				     GPIO2BL4_SPI_CSN1_M0
+				     << GPIO2BL4_SEL_SHIFT);
+			break;
+		default:
+			goto err;
+		}
+		rk_clrsetreg(GRF_GPIO2BL_IOMUX,
+			     GPIO2BL0_SEL_MASK,
+			     GPIO2BL0_SPI_CLK_TX_RX_M0 << GPIO2BL0_SEL_SHIFT);
+		break;
+	default:
+		goto err;
+	}
+
+	return 0;
+err:
+	//debug("rkspi: periph%d cs=%d not supported", spi_id, cs);
+	return -1;
+}
+
+
+static void pinctrl_rk3328_uart_config(int uart_id)
+{
+	unsigned int com_iomux = in32(RK3328_GRF_BASE + GRF_COM_IOMUX);
+
+	switch (uart_id) {
+	case PERIPH_ID_UART2:
+		break;
+		if (com_iomux & IOMUX_SEL_UART2_MASK)
+			rk_clrsetreg(GRF_GPIO2A_IOMUX,
+				     GPIO2A0_SEL_MASK | GPIO2A1_SEL_MASK,
+				     GPIO2A0_UART2_TX_M1 << GPIO2A0_SEL_SHIFT |
+				     GPIO2A1_UART2_RX_M1 << GPIO2A1_SEL_SHIFT);
+
+		break;
+	case PERIPH_ID_UART0:
+	case PERIPH_ID_UART1:
+	case PERIPH_ID_UART3:
+	case PERIPH_ID_UART4:
+	default:
+		// debug("uart id = %d iomux error!\n", uart_id);
+		break;
+	}
+}
+
+
+static void pinctrl_rk3328_sdmmc_config(struct rk3328_grf_regs *grf,
+					int mmc_id)
+{
+	unsigned int com_iomux = in32(RK3328_GRF_BASE + GRF_COM_IOMUX);
+
+	switch (mmc_id) {
+	case PERIPH_ID_EMMC:
+		rk_clrsetreg(GRF_GPIO0A_IOMUX,
+			     GPIO0A7_SEL_MASK,
+			     GPIO0A7_EMMC_DATA0 << GPIO0A7_SEL_SHIFT);
+		rk_clrsetreg(GRF_GPIO2D_IOMUX,
+			     GPIO2D4_SEL_MASK,
+			     GPIO2D4_EMMC_DATA1234 << GPIO2D4_SEL_SHIFT);
+		rk_clrsetreg(GRF_GPIO3C_IOMUX,
+			     GPIO3C0_SEL_MASK,
+			     GPIO3C0_EMMC_DATA567_PWR_CLK_RSTN_CMD
+			     << GPIO3C0_SEL_SHIFT);
+		break;
+	case PERIPH_ID_SDCARD:
+		/* SDMMC_PWREN use GPIO and init as regulator-fiexed  */
+		if (com_iomux & IOMUX_SEL_SDMMC_MASK)
+			rk_clrsetreg(GRF_GPIO0D_IOMUX,
+				     GPIO0D6_SEL_MASK,
+				     GPIO0D6_GPIO << GPIO0D6_SEL_SHIFT);
+		else
+			rk_clrsetreg(GRF_GPIO2A_IOMUX,
+				     GPIO2A7_SEL_MASK,
+				     GPIO2A7_GPIO << GPIO2A7_SEL_SHIFT);
+		rk_clrsetreg(GRF_GPIO1A_IOMUX,
+			     GPIO1A0_SEL_MASK,
+			     GPIO1A0_CARD_DATA_CLK_CMD_DETN
+			     << GPIO1A0_SEL_SHIFT);
+		break;
+	default:
+		// debug("mmc id = %d iomux error!\n", mmc_id);
+		break;
+	}
+}
+
+void init_board()
+{
+    uint32_t tmp;
+
+}
+

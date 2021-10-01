@@ -1,0 +1,416 @@
+###########################################################################
+##
+## QNX Neutrino 7.0 on the R-Car V3H (ARMv8 Cortex-A53 core) Condor Board
+##
+###########################################################################
+##
+## SUPPORTED DEVICES:
+##
+## SERIAL: SCIF0
+## I2C: I2C0, I2C3, I2C4
+## SPI FLASH
+## SPI: MSIOF0
+## THERMAL
+## NETWORK: RAVB
+## WATCHDOG
+## WFD
+###########################################################################
+##
+## NOTES:
+##
+###########################################################################
+
+###########################################################################
+## START OF BUILD SCRIPT
+###########################################################################
+
+#[+keeplinked]
+[+compress]
+[image=0x02000000]
+[virtual=aarch64le,raw] .bootstrap = {
+    # Options specific to this BSP:
+    #
+    startup-rk3328 -P4 -W -vvv
+    #######################################################################
+    ## PATH set here is the *safe* path for executables.
+    ## LD_LIBRARY_PATH set here is the *safe* path for libraries.
+    ##     i.e. These are the paths searched by setuid/setgid binaries.
+    ##          (confstr(_CS_PATH...) and confstr(_CS_LIBPATH...))
+    #######################################################################
+    PATH=/proc/boot:/bin:/usr/bin:/usr/photon/bin:/opt/bin:/sbin:/usr/sbin:/usr/lib:/tmp:/etc
+    LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib:/lib/dll:/opt/lib:/usr/photon/lib:/usr/lib:/tmp:/etc procnto-smp-instr -ae -v
+}
+
+[+script] .script = {
+    # Initialise the console
+    procmgr_symlink ../../proc/boot/libc.so /usr/lib/ldqnx-64.so.2
+
+    display_msg Welcome to QNX Neutrino 7.0 on the Rockchip Rock64 Board
+
+    # Setup Environment variables
+    ENV=/etc/profile
+
+    # Start some common servers
+    display_msg Starting slogger and pipe servers...
+    slogger2
+    pipe &
+    slog2info &
+    #######################################################################
+    ## Random service
+    #######################################################################
+    display_msg "Starting random service ..."
+    random -t
+    waitfor /dev/random 5
+
+    #######################################################################
+    ## WatchDog utility
+    ## If startup is given '-W' parameter then the 'wdtkick' utility MUST
+    ## be uncommented below.
+    #######################################################################
+    display_msg Starting watchdog ...
+    wdtkick -t20000
+
+    #######################################################################
+    ## Serial driver
+    #######################################################################
+    display_msg Starting Serial driver (UART2)...
+    devc-ser16550 -e -F -S -b1500000 -c24000000/16 0xFF130000^2,89 
+    waitfor /dev/ser1 4
+    reopen /dev/ser1
+
+    #######################################################################
+    ## Remote debug
+    #######################################################################
+    display_msg Starting Remote debug ...
+    inetd
+    devc-pty
+    mqueue &
+    [+session] ksh &
+}
+
+# Redirect console messages
+[type=link] /bin/sh=/proc/boot/ksh
+[type=link] /tmp=/dev/shmem
+[type=link] /dev/console=/dev/ser1
+[type=link] /var/log=/tmp
+
+###########################################################################
+## Serial driver
+###########################################################################
+devc-ser16550
+
+###########################################################################
+## Shared Libraries
+###########################################################################
+libc.so
+libpps.so
+libm.so
+libslog2.so
+libslog2parse.so
+libslog2shim.so
+libtracelog.so
+devnp-usbdnet.so
+libc++.so
+libz.so
+
+# Block device
+libcam.so
+io-blk.so
+cam-disk.so
+fs-qnx6.so
+fs-dos.so
+libncursesw.so
+
+# Network driver
+libsocket.so
+libcrypto.so
+
+
+###########################################################################
+## SPI driver
+###########################################################################
+
+# Executables
+[data=c]
+
+# Create a profile so telnet sessions will get environment variables
+/etc/profile={
+export SYSNAME=nto
+export TERM=qansi
+export HOME=/
+export LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib:/lib/dll:/usr/lib:/opt/lib:/usr/lib/graphics/
+export PATH=/proc/boot:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/lib:/opt/bin
+export SHELL=/bin/sh
+export DISPLAY=127.1:0
+export HOSTNAME=Neutrino
+export TMPDIR=/tmp
+export LOGNAME=root
+}
+
+###########################################################################
+## WatchDog utility
+###########################################################################
+wdtkick
+
+###########################################################################
+## Resource seed
+###########################################################################
+/proc/boot/resource_seed=resource_seed
+
+###########################################################################
+## Serial driver
+###########################################################################
+
+
+###########################################################################
+## I2C driver
+###########################################################################
+
+
+###########################################################################
+## SPI Flash driver
+###########################################################################
+
+
+###########################################################################
+## Network driver
+###########################################################################
+io-pkt-v6-hc
+nicinfo
+ping
+ftp
+fs-nfs3
+ifconfig
+if_up
+inetd
+telnet
+
+###########################################################################
+## SPI driver
+###########################################################################
+
+
+###########################################################################
+## dhclient support
+###########################################################################
+dhclient
+/sbin/ifconfig=ifconfig
+[search=${QNX_TARGET}/sbin] /sbin/dhclient-script=dhclient-script
+[search=${QNX_TARGET}/etc]/etc/dhclient.conf=dhclient.conf
+
+###########################################################################
+## Remote debug
+###########################################################################
+qconn
+pdebug
+
+###########################################################################
+## Network services (telnet) support
+###########################################################################
+devc-pty
+tftp
+/etc/hosts=${QNX_TARGET}/etc/hosts
+/etc/services=${QNX_TARGET}/etc/services
+
+/etc/inetd.conf = {
+ftp        stream tcp nowait root  /usr/sbin/ftpd           in.ftpd -l
+telnet     stream tcp nowait root  /usr/sbin/telnetd        in.telnetd
+}
+
+/etc/ftpusers=${QNX_TARGET}/etc/ftpusers
+
+/etc/ftpd.conf = {
+/* Make things a+rw by default */
+umask all 0000
+}
+
+[uid=0 gid=0 perms=0644] /etc/passwd = {
+root:x:0:0:Superuser:/root:/bin/sh
+sshd:x:15:6:sshd:/var/chroot/sshd:/bin/false
+qnxuser:x:1000:1000:QNX User:/home/qnxuser:/bin/sh
+}
+
+# Enabled Username/Password: root/root, qnxuser/qnxuser
+[uid=0 gid=0 perms=0600] /etc/shadow = {
+root:@S@NKlWES1quMp1wmqugkUSnFEpPGn58kIs4wQOgDDNs06vimR+bbGPUKM+9P6jbFUzo3Rm+Qe5MS+17xKhwaeJEg==@Mjg5ZTJiMTM0YTRjYTE2ZGFjMDdhZTFlY2NlMDVmNmE=:1468494669:0:0
+sshd:*:1231323780:0:0
+qnxuser:@S@HZERXjgixvb3157FFeraShhvTVw+10ccUtVUVZbi0fUwpzlzBZFw5gHiFd1XHKit8D39Whe749XAY8fV4P5ANQ==@Y2ZlOTg3M2RhNTM4Y2M2ODY0OWZhODdiNDRkMmU5Nzg=:1468488235:0:0
+}
+
+[uid=0 gid=0 perms=0644] /etc/group = {
+root:x:0:root
+sshd:x:6:
+qnxuser:x:qnxuser
+}
+
+###########################################################################
+## PAM configurations addon build file
+###########################################################################
+[uid=0 gid=0 perms=4755] /bin/login=login
+[uid=0 gid=0 perms=4755] /bin/passwd=passwd
+[uid=0 gid=0 perms=4755] /bin/su=su
+[uid=0 gid=0 perms=0755] /usr/sbin/sshd=sshd
+[uid=0 gid=0 perms=0755] /usr/sbin/ftpd=ftpd
+[uid=0 gid=0 perms=0755] /usr/sbin/inetd=inetd
+[uid=0 gid=0 perms=0755] /usr/sbin/telnetd=telnetd
+
+[uid=0 gid=0 type=dir dperms=0755] /usr
+[uid=0 gid=0 type=dir dperms=0755] /usr/lib
+[uid=0 gid=0 type=dir dperms=0755] /etc
+[uid=0 gid=0 type=dir dperms=0755] /etc/pam.d
+[uid=0 gid=0 perms=0644] /etc/pam.d/login=${QNX_TARGET}/etc/pam.d/login
+[uid=0 gid=0 perms=0644] /etc/pam.d/on=${QNX_TARGET}/etc/pam.d/on
+[uid=0 gid=0 perms=0644] /etc/pam.d/passwd=${QNX_TARGET}/etc/pam.d/passwd
+[uid=0 gid=0 perms=0644] /etc/pam.d/su=${QNX_TARGET}/etc/pam.d/su
+[uid=0 gid=0 perms=0644] /etc/pam.d/ftpd=${QNX_TARGET}/etc/pam.d/ftpd
+
+[uid=0 gid=0 perms=0755] /usr/lib/pam_ftpusers.so=pam_ftpusers.so
+[uid=0 gid=0 perms=0755] /usr/lib/pam_rootok.so=pam_rootok.so
+[uid=0 gid=0 perms=0755] /usr/lib/pam_qnx.so=pam_qnx.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_deny.so=pam_deny.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_echo.so=pam_echo.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_exec.so=pam_exec.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_group.so=pam_group.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_mac.so=pam_mac.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_permit.so=pam_permit.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_radius.so=pam_radius.so
+#[uid=0 gid=0 perms=0755] /usr/lib/pam_self.so=pam_self.so
+
+###########################################################################
+## Filesystems support
+###########################################################################
+fdisk
+mkdosfs
+mkqnx6fs
+devb-ram
+
+###########################################################################
+## Thermal driver
+###########################################################################
+
+############################################################################
+
+###########################################################################
+## MMC block driver support files
+###########################################################################
+
+
+###########################################################################
+# LCD Graphics support
+###########################################################################
+screen
+/etc/system/config/img.conf=${QNX_TARGET}/etc/system/config/img.conf
+
+#GRAPHIC ROOT:
+#/usr/lib/graphics/R_CarV3H/graphics.conf=../prebuilt/aarch64le/usr/lib/graphics/R_CarV3/graphics.conf
+#/usr/lib/graphics/R_CarV3H/libWFDrcar.so=../install/aarch64le/usr/lib/graphics/R_CarGen3/libWFDrcar.so
+#/usr/lib/graphics/R_CarV3H/libwfdcfg-v3_evm.so=../install/aarch64le/usr/lib/graphics/R_CarGen3/libwfdcfg-v3_evm.so
+
+#GRAPHIC LIB:
+/usr/lib/libEGL.so=libEGL.so
+/usr/lib/libGLESv1_CL.so=libGLESv1_CL.so
+/usr/lib/libGLESv1_CM.so=libGLESv1_CM.so
+/usr/lib/libGLESv2.so=libGLESv2.so
+/usr/lib/libscreen.so=libscreen.so
+/usr/lib/libswblit.so=libswblit.so
+/usr/lib/libWFD.so=libWFD.so
+/usr/lib/libz.so=libz.so
+/usr/lib/libfreetype.so=libfreetype.so
+
+/lib/dll/screen-gles1.so=screen-gles1.so
+/lib/dll/screen-gles2.so=screen-gles2.so
+/lib/dll/screen-sw.so=screen-sw.so
+/lib/dll/screen-debug.so=screen-debug.so
+/lib/libhiddi.so=libhiddi.so
+/lib/libinputevents.so=libinputevents.so
+/lib/libkalman.so=libkalman.so
+/lib/libjpeg.so=libjpeg.so
+/lib/libscrmem.so=libscrmem.so
+/lib/libmemobj.so=libmemobj.so
+/lib/libmtouch-calib.so.1=libmtouch-calib.so.1
+
+#GRAPHIC APP
+sw-vsync
+
+###########################################################################
+## VIN, IMR library 
+###########################################################################
+
+# 
+# ### VIN application 
+
+
+###########################################################################
+## Libraries for IMPX5 
+###########################################################################
+#libwrap2.so
+
+###########################################################################
+## CPG driver 
+###########################################################################
+
+
+###########################################################################
+## DISCOM utility 
+###########################################################################
+
+
+###########################################################################
+## TMU driver 
+###########################################################################
+
+
+###########################################################################
+## general commands
+###########################################################################
+cp
+ls
+cat
+ksh
+pipe
+pidin
+uname
+slogger2
+slog2info
+slay
+mount
+umount
+use
+date
+shutdown
+chmod
+ln
+rm
+mv
+sleep
+dd
+top
+grep
+df
+find
+mkdir
+pwd
+waitfor
+echo
+dumper
+flashctl
+in32
+out32
+awk
+ps
+random
+route
+canctl
+mqueue
+iperf3
+###########################################################################
+## uncomment for Image Loading
+###########################################################################
+[prefix=/lib/dll]
+img_codec_bmp.so
+img_codec_gif.so
+img_codec_jpg.so
+img_codec_png.so
+img_codec_sgi.so
+img_codec_tga.so
+img_codec_tif.so
