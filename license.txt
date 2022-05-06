@@ -14,5 +14,5 @@
  *
  */
 
-1.Rock64 QNX Image file is provided strickly for Acadamic use.
-2.For any commercial use or distibution of other purpose , please contact licensing@qnx.com
+1.Rock64 QNX Image file is provided strickly for Academic use.
+2.For any commercial use or distibution of other purpose , please contact QNX licensing@qnx.com
